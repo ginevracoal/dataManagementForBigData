@@ -1,4 +1,4 @@
-.open nycflights13
+.open nycflights13.db
 
 select 'JOIN:';
 select ' ';
