@@ -1,4 +1,4 @@
-.open ../DB/nycflights13.db
+.open ../nycflights13.db
 
 -- WHERE
 select 'WHERE:';

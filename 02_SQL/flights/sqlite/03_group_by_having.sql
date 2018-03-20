@@ -1,4 +1,4 @@
-.open nycflights13.db
+.open ../nycflights13.db
 
 -- 	GROUP BY AND HAVING
 select 'GROUP BY AND HAVING:';

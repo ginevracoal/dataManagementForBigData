@@ -1,0 +1,109 @@
+---
+title: "SQL from R"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, echo=FALSE}
+knitr::opts_chunk$set(cache=FALSE, message = TRUE, warning = TRUE)
+```
+
+
+```{r}
+## Load libraries
+library(DBI)
+library(dplyr)
+library(dbplyr)
+library(nycflights13)
+
+# Connect to the database
+nyc <- dbConnect(RSQLite::SQLite(), "nycflights13")
+
+# If you just need a temporary database, use either "" (for an on-disk database) or ":memory:" (for a in-memory database). This database will be automatically deleted when you disconnect from it.
+
+
+# Add surrogate key to flights
+flights <- 
+  flights %>% 
+  arrange(year, month, day, sched_dep_time, carrier, flight) %>%
+  mutate(id = row_number()) %>%
+  select(id, everything())
+
+# cure the violation of FKC
+id_set_planes = anti_join(flights, planes, by = "tailnum")$id
+id_set_airports = anti_join(flights, airports, by = c("dest" = "faa"))$id
+flights = mutate(flights, tailnum = ifelse(id %in% id_set_planes, NA, tailnum),
+dest = ifelse(id %in% id_set_airports, NA, dest))
+
+
+# write data frames into database tables (if necessary)
+dbWriteTable(nyc, "flights", flights)
+dbWriteTable(nyc, "airports", airports)
+dbWriteTable(nyc, "planes", planes)
+dbWriteTable(nyc, "weather", weather)
+dbWriteTable(nyc, "airlines", airlines)
+
+# list tables
+dbListTables(nyc)
+
+# list fields of a table
+dbListFields(nyc, "flights")
+
+# query with SQL
+query1 = 
+"select id, month, day, sched_dep_time, carrier, flight number 
+from flights 
+where month = 12 and day = 25
+limit 10"
+
+dbGetQuery(nyc, query1) 
+
+query2 = 
+"select flights.id, airports2.alt, airports1.alt, (airports2.alt - airports1.alt) as altdiff
+from flights, airports as airports1, airports as airports2
+where flights.origin = airports1.faa and flights.dest = airports2.faa and altdiff > 6000
+limit 10"  
+
+dbGetQuery(nyc, query2) 
+
+
+# Alternatively, query with dplyr using dbplyr package
+
+# get a reference to the table flights
+flights_db <- tbl(nyc, "flights")
+
+# run a query in dplyr
+flights_db %>% 
+  group_by(dest) %>%
+  summarise(delay = mean(dep_time))
+
+# show the SQL statement
+flights_group_db <- flights_db %>% 
+  group_by(dest) %>%
+  summarise(delay = mean(dep_time))
+
+flights_group_db %>% show_query()
+
+
+# If you run a query and the results don't fit in memory, you can use dbSendQuery(), dbFetch() and dbClearResults() to retrieve the results in batches. 
+
+# archivio la query:
+rs <- dbSendQuery(nyc, 'select * from flights limit 100')
+# memorizzo a blocchi:
+while (!dbHasCompleted(rs)) {
+  # eseguo la query su un blocco di dimensione 10:
+  df <- dbFetch(rs, n = 10)
+  print(nrow(df))
+}
+dbClearResult(rs)
+
+# disconnect the database
+dbDisconnect(nyc)
+
+# remove  the database (if necessary)
+unlink("nycflights13")
+```
+
+
+
