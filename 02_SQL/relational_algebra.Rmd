@@ -1,0 +1,73 @@
+---
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+```{r}
+library(nycflights13)
+library(dplyr)
+```
+
+## WRITE THE FOLLOWING QUERIES
+ 
+1. the flight number, the plane tail number, and plane manufacturer of 
+flights manufactuerd by EMBRAER. Mind that flights and planes tables share
+the year attribute with different semantics.
+
+$$
+(flights \bowtie planes) > \\ 
+\sigma(manufacturer = EMBRAER) > \\ 
+\pi(\{flight, tailnum, manufacturer\})
+$$
+
+```{r}
+inner_join(flights, planes, by = 'tailnum') %>% 
+  filter(manufacturer == 'EMBRAER') %>% 
+  select(flight, tailnum, manufacturer)
+  
+```
+
+2. the flight number, month, day, hour, origin, and visibility of flights 
+that took off with a visibility of 3 miles
+
+$$
+(flights \bowtie \sigma(weather,visib=3)) > \\
+\pi(\{flight, month, day, hour, orig, visib\})
+$$
+
+```{r}
+inner_join(flights, filter(weather, visib ==3)) %>% 
+  select(flight, month, day, hour, origin, visib)
+  
+```
+
+3. flight paths of length 2 (X –> Y –> Z)
+
+$$
+\rho(\sigma(flights, \{orig, dest\}),\{X = origin, Y = dest\}) \bowtie \\
+\rho(\sigma(flights, \{orig, dest\}),\{Y = origin, Z = dest\}) 
+$$
+
+```{r}
+# distinct retains only unique/distinct rows from an input tbl.
+select(flights, X = origin, Y = dest) %>% 
+  inner_join(select(flights, Y=origin, Z=dest)) %>% 
+  distinct()
+```
+
+4. flight paths of length 3 (X –> Y –> W –> Z).
+
+$$
+\rho(\sigma(flights, \{orig, dest\}),\{X = origin, Y = dest\}) \bowtie \\
+\rho(\sigma(flights, \{orig, dest\}),\{Y = origin, W = dest\}) \bowtie \\
+\rho(\sigma(flights, \{orig, dest\}),\{W = origin, Z = dest\}) 
+$$
+```{r}
+select(flights, X = origin, Y = dest) %>% 
+  inner_join(select(flights, Y = origin, W = dest)) %>% 
+  inner_join(select(flights, W = origin, Z = dest)) %>% 
+  distinct()
+```
+
+5. Can you generalize to paths of arbitrary length? 
+No.

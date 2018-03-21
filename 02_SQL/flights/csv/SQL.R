@@ -13,23 +13,23 @@ flights <-
   arrange(year, month, day, sched_dep_time) %>%
   mutate(id = row_number()) %>% # adding id column
   select(id, everything())
-View(flights)
+head(flights)
 
 # On the other hand, the other tables have key attributes:
 planes %>% 
   count(tailnum) %>% 
   filter(n > 1)
-View(planes)
+head(planes)
 
 airports %>% 
   count(faa) %>% 
   filter(n > 1)
-View(airports)
+head(airports)
 
 weather %>% 
   count(time_hour, origin) %>% 
   filter(n > 1)
-View(weather)
+head(weather)
 
 # Unfortunately, some foreign key constraints are not satisfied 
 # by our dataset:
@@ -82,4 +82,5 @@ write.table(planes, file = "planes.csv", sep = ",", row.names=FALSE, col.names =
 write.table(weather, file = "weather.csv", sep = ",", row.names=FALSE, col.names = FALSE, quote=FALSE, na="", qmethod = "double")
 
 write.table(flights, file = "flights.csv", sep = ",", row.names=FALSE, col.names = FALSE, quote=FALSE, na="", qmethod = "double")
+
 
