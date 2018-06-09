@@ -1,2 +1,6 @@
 *.csv
 *.db
+.Rproj.user
+exam/kickstarter-projects/*.csv
+exam/kickstarter_chache/
+exam/kickstarter_files/
