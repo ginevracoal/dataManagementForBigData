@@ -1,0 +1,715 @@
+---
+title:  'Data analysis of Kickstarter projects'
+author: Ginevra Carbone
+always_allow_html: yes
+editor_options:
+  chunk_output_type: inline
+output:
+  html_document:
+    toc: yes
+  pdf_document:
+    toc: yes
+---
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(cache = TRUE)
+```
+
+```{r echo=FALSE, message=FALSE}
+library(tidyverse)
+library(dplyr)
+library(ggplot2)
+library(highcharter)
+library(scales)
+library(tm)
+library(wordcloud)
+library(stringr)
+library(ROCR)
+library(randomForest)
+```
+
+## Introduction
+
+Kickstarter is a famous crowdfunding platform launched on April 28, 2009. It contains creative projects from all the world. Each new project has a specific funding goal for its production and a deadline: if the funding goal is not met within the deadline, all fudings go back to their backers and the project fails, otherwise the creators can complete their project and start selling it on the market.
+
+My goal in this report is to analyze a dataset on kickstarter projects provided by the website *www.kaggle.com* and extract some useful informations from it.
+
+The dataset I refer to (*"ks-projects-201801.csv"*) can be downloaded from [1].  
+
+## Data analysis
+
+Let's take a first look into the structure of data.
+It contains $378661$ projects launched on Kickstarter and has the following column names:
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+# IMPORT + FIRST CLEAN
+projects <- read_csv("kickstarter-projects/ks-projects-201801.csv")
+
+# removing unnecessary column about pledged money
+projects <- projects %>% 
+  rename(drop = 'usd pledged') %>% 
+  select(-drop)
+
+  # select(-c(pledged, drop))
+
+# number of projects
+# nrow(projects)
+
+colnames(projects)
+```
+
+First of all I checked for **missing values** and only got 4 NAs in the column `name`: being only 4 entries, I simply removed them.
+
+```{r echo=FALSE}
+# MISSING VALUES
+
+# check if there are any NA values
+# sum(is.na(projects))
+
+# which columns contain NA values 
+sapply(projects, function(x) sum(is.na(x)))
+
+# checking for missing names
+projects[is.na(projects$name),] %>% select(ID, name)
+
+# 4 rows have missing names, so I drop them
+projects <- projects %>% 
+  filter(!is.na(projects$name)) 
+
+## Time analysis
+```
+
+Then I looked at **launch dates**. The first seven entries had a wrong date (1970-01-01), so I dropped them too.
+
+```{r echo=FALSE}
+projects %>% select(name, launched, usd_pledged_real) %>%
+  arrange(launched) %>% 
+  select(name, launched)
+# here there is something wrong! let's remove these first entries
+projects <- projects %>% filter(usd_pledged_real > 0)
+```
+
+The dataset contains all projects launched between 21/04/2009 (referring to the first project ever) and 02/01/2018.
+
+```{r echo=FALSE}
+# arrange projects by launch date
+projects_byLaunch <- projects %>% 
+  select(name, launched, usd_pledged_real) %>%
+  arrange(launched)
+
+# first date
+projects_byLaunch[1,] %>% select(launched)
+#last date
+projects_byLaunch[nrow(projects_byLaunch),] %>% select(launched)
+
+# arrange projects by deadline
+# projects_byDeadline <- projects %>% 
+#   select(name, deadline, usd_pledged_real) %>%
+#   arrange(deadline)
+```
+
+This plots shows the distribution of USD fundings over time.
+```{r echo=FALSE}
+
+projects_byLaunch %>% 
+  ggplot(aes(launched, usd_pledged_real)) + 
+  geom_line() +
+  # scale_x_date(format = "%b-%Y") + 
+  xlab("launch date") + ylab("USD pledged") + 
+  labs(title="USD pledged for each project over time") + 
+  theme(plot.title = element_text(hjust=0.5))
+```
+
+### Fundings
+
+I started analyzing columns referring to **pledged money**: for each possible currency, this dataset contains the corresponding pledged money in USD as `usd_pledged_real`.
+```{r echo=FALSE}
+# pledged refers to the original currency, usd_pledged_real refers to USD
+# projects %>% count(pledged != usd_pledged_real && currency == "USD") 
+projects %>% 
+  filter(pledged != usd_pledged_real) %>% 
+  select(currency, pledged, usd_pledged_real)
+```
+
+It also contains all conversions for goal fundings.
+
+```{r echo=FALSE}
+# goal refers to the original currency, while usd_goal_real to USD
+# projects %>% count(goal != usd_goal_real && currency == "USD") 
+projects %>% 
+  filter(goal != usd_goal_real) %>% 
+  select(currency, goal, usd_goal_real, usd_pledged_real, state)
+```
+
+The histogram shows the sum of **pledges over each year**, 2015 being the most funded one. I excluded 2018 from the maximum pledge plot since it only refers to a limited amount of projects.
+
+```{r echo=FALSE}
+total_usd_byYear <- projects_byLaunch %>% 
+  mutate(year = format(launched, "%Y")) %>%
+  filter(year != "2018") %>%
+  group_by(year) %>%
+  summarise(total_usd_pledged = sum(usd_pledged_real))
+
+ggplot(total_usd_byYear, aes( x=year, y=total_usd_pledged, fill=total_usd_pledged)) +
+  geom_bar(stat="identity") + 
+  ggtitle("Total pledges by year") + 
+  xlab("Year") +
+  ylab("Total USD pledged") + 
+  scale_fill_gradient(low="lightblue3", high="slateblue4", guide=FALSE) +
+  geom_text(aes(label=dollar(total_usd_pledged)), hjust=0) +
+  coord_flip() +
+  theme(plot.title=element_text(hjust=0), 
+         axis.title=element_text(size=12, face="bold"),
+         legend.position="bottom",
+         legend.title=element_text(size=10)) +
+  ylim(0,8e+08)
+
+# of course I exclude 2018 from this plot...
+```
+
+These are the single projects having higher pledge by year:
+
+```{r echo=FALSE}
+# projects having higher pledge by year
+max_pledged_byYear <- projects %>%
+   mutate(year = format(launched, "%Y")) %>%
+   group_by(year) %>%  
+   summarise(max_pledged = max(usd_pledged_real))
+
+projects %>% mutate(year = format(launched, "%Y")) %>%
+  left_join(max_pledged_byYear) %>% 
+  filter(usd_pledged_real == max_pledged) %>% 
+  select(name, usd_pledged_real, year, ID) %>% 
+  mutate(usd_pledged_real = dollar(usd_pledged_real)) %>% 
+  arrange(year)
+```
+
+
+The **most funded project** in the history of kickstarter is "Pebble Time", with a $20,338,986 funding in 2015.
+
+### Categories
+
+```{r echo=FALSE}
+# list of all the possible categories and subcategories
+# unique(projects$main_category)
+# unique(projects$category)
+```
+
+Projects are divided into 15 categories, each one having many subcategories. The **interactive pie chart** below allows to explore the distribution of subcategories over each category.
+
+```{r categories and subcategories, echo=FALSE}
+                                                    
+df1 <- projects %>%
+  group_by(name=main_category, drilldown=main_category) %>%     
+  summarise(y = n()) %>% 
+  arrange(desc(y))
+
+df2 <- projects %>% 
+  group_by(main_category, category) %>% 
+  mutate(y = n(), colorByPoint =  1) %>% 
+  arrange(desc(y))%>%
+  group_by(name=main_category, id = main_category, colorByPoint) %>% 
+  do(data = list_parse(
+    mutate(., name=category, drilldown="category") %>% 
+  group_by(name, drilldown) %>% 
+  summarise(y=n())%>% 
+  select(name, y, drilldown) %>% 
+  arrange(desc(y))))
+
+highchart() %>% 
+  hc_chart(type = "pie") %>%
+  hc_title(text = 'Main categories and corresponding subcategories') %>%
+  hc_add_series(data = df1, name = "Main categories",colorByPoint =  1) %>% 
+  hc_legend(enabled = FALSE) %>%
+  hc_xAxis(type = "category") %>% 
+  hc_drilldown(
+    allowPointDrilldown = TRUE,
+    series =list_parse(df2)
+  ) %>% hc_add_theme(hc_theme_economist())
+```
+
+The information about subcategories is not very useful: most of them have the same name as the main category and do not provide any additional information. This interactive chart also counts the number of projects for each category and subcategory, which are better collected in the following histogram.
+
+```{r echo=FALSE}
+
+# first 10 projects based on the number of backers
+top_projects <- projects %>% 
+  select(name, category, main_category, backers) %>% 
+  top_n(15, backers) %>% 
+  arrange(desc(backers))
+
+# top_projects
+
+# most frequent categories
+top_main_categories <- projects %>% 
+  group_by(main_category) %>% 
+  summarize(count=n()) %>%
+  arrange(desc(count)) %>% 
+  rename( n_projects = count)
+
+# top_main_categories
+
+ggplot(top_main_categories, 
+       aes( x=reorder(main_category, -n_projects),
+            y=n_projects, fill=n_projects)) +
+  geom_bar(stat="identity") + 
+  ggtitle("Most frequent categories") + 
+  xlab("Main category") +
+  ylab("Number of projects") +
+  scale_fill_gradient(low="lightblue", high="slateblue4", guide=FALSE) +
+  geom_text(aes(label=n_projects), vjust=-0.2) +
+  theme(plot.title=element_text(hjust=0), 
+        axis.text.x = element_text(angle = 45, hjust = 1),
+        axis.title=element_text(size=12, face="bold"),
+        legend.position="bottom",
+        legend.title=element_text(size=10)) +
+  ylim(0,70000)
+
+```
+
+```{r echo=FALSE}
+# most frequent subcategories
+# top_categories <- projects %>% 
+#   group_by(category, main_category) %>% 
+#   summarize(count=n()) %>%
+#   arrange(desc(count)) %>% 
+#   rename( n_projects = count)
+# 
+# top_categories
+# 
+# ggplot(head(top_categories, 15), aes( x=reorder(category, -n_projects), y=n_projects, fill=n_projects)) +
+#   geom_bar(stat="identity") + 
+#   ggtitle("Most frequent subcategories") + 
+#   xlab("Subcategory") +
+#   ylab("Number of projects") + 
+#   scale_fill_gradient(low="lightblue", high="slateblue4") +
+#   geom_text(aes(label=n_projects), vjust=-0.5)  +
+#   theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+```
+
+**Film & Video** and **Music** are the largest categories, let's see how much money they raised. 
+These are the top 15 categories in terms of funding.
+
+```{r echo=FALSE}
+# most funded categories with pledges distribution over categories
+
+pledge_mainCat <- projects %>%
+  group_by(main_category) %>%
+  summarize(usd_pledged=sum(usd_pledged_real)) %>%
+  arrange(desc(usd_pledged))
+
+ggplot(head(pledge_mainCat, 15), aes( x=reorder(main_category, -usd_pledged), y=usd_pledged, fill=usd_pledged)) +
+  geom_bar(stat="identity") + 
+  coord_flip() +
+  ggtitle("Top 15 pledged categories") + 
+  xlab("Main category") +
+  ylab("Total USD pledged") + 
+  scale_fill_gradient(low="lightblue", high="slateblue4", guide=FALSE) +
+  geom_text(aes(label=dollar(usd_pledged)), hjust=0)  +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  ylim(0,9e+08)
+
+# projects %>% summarise(total=dollar(sum(usd_pledged_real)))
+```
+
+
+```{r echo=FALSE, include=FALSE}
+# usd raised by the first two categories
+dollar(sum(pledge_mainCat[1:2,]$usd_pledged))
+# half of the total money raised
+dollar(sum(pledge_mainCat[1:length(pledge_mainCat$main_category),]$usd_pledged)/2) 
+```
+
+Film & Video and Music have a great amount of fundings, but **Design** and **Games** alone, which are the most funded, with $\$1,475,547,207$ dollars almost account for half of the total money raised ($\$3,422,378,422$).
+
+### Success 
+
+Projects have six possible **states**. I discarded all the ones having an undefined state.
+
+```{r echo=FALSE}
+unique(projects$state)
+```
+
+
+```{r echo=FALSE}
+# projects %>%  count(state=="undefined")
+projects <- projects %>% filter(state != "undefined")
+```
+
+The distribution of categories over each state can be explored in this pie chart:
+
+```{r echo=FALSE}
+df1_state <- projects %>%
+  group_by(name=state, drilldown=state) %>%     
+  summarise(y = n()) %>% 
+  arrange(desc(y))
+
+df2_state <- projects %>% 
+  group_by(state, main_category) %>% 
+  mutate(y = n(), colorByPoint =  1) %>% 
+  arrange(desc(y))%>%
+  group_by(name=state, id = state, colorByPoint) %>% 
+  do(data = list_parse(
+    mutate(., name=main_category, drilldown="main_category") %>% #tolower(paste(state, main_category, sep="="))) %>% 
+  group_by(name, drilldown) %>% 
+  summarise(y=n())%>% 
+  select(name, y, drilldown) %>% 
+  arrange(desc(y))))
+
+
+highchart() %>% 
+  hc_chart(type = "pie") %>%
+  hc_title(text = 'State of projects distribution over categories for each state') %>%
+  hc_add_series(data = df1_state, name = "State_of_projects",colorByPoint =  1) %>% 
+  hc_legend(enabled = FALSE) %>%
+  hc_xAxis(type = "category") %>% 
+  hc_drilldown(
+    allowPointDrilldown = TRUE,
+    series =list_parse(df2_state)
+  ) %>% hc_add_theme(hc_theme_economist())
+```
+
+Focusing on the states `successful` vs `failed`, we only need to look at the average differences between goal and total USD pledged for each category.
+
+```{r echo=FALSE}
+projects %>% 
+  filter(state %in% c("successful", "failed")) %>% 
+  group_by(main_category, state) %>% 
+  summarise(diff = median(usd_pledged_real-usd_goal_real, na.rm = T)) %>% 
+  arrange(diff) %>% 
+  # mutate(diff = diff - median(diff)) %>%
+  ggplot(aes(fill=state)) +
+  geom_bar(aes(reorder(main_category, diff), diff), 
+           stat = 'identity') +
+  coord_flip() + 
+  scale_fill_manual(values=c("lightblue3", "slateblue2")) +
+  labs(x = 'Category',
+       y = 'money pledged - goal (USD)',
+       title = 'Average difference between pledge and goal') 
+```
+
+Successful **Technology**, **Games** and **Design** projects show the highest fundings respect to the initial goal, overcoming it by $\$5000$ for Technology.
+In case of failure, **Technology** also has the lowest fundings, going under the goal by over $\$15000$. It is followed by **Design** and **Food** categories, then Games and Film & Video.
+This shows that some categories are more unpredictable than others in terms of expected fundings, and Technology in particular is the most risky field.
+
+The following histogram shows Success vs Failure percentage rate for each category.
+
+```{r echo=FALSE, message=FALSE}
+
+# success and failure by category
+state_perc <- projects %>%
+  filter(state %in% c("successful", "failed")) %>%
+  group_by(main_category, state) %>%
+  summarize(n = n()) %>%
+  mutate(perc = n/sum(n)) %>%
+  arrange(desc(state), perc)
+
+state_perc$main_category <- factor(state_perc$main_category,
+levels=state_perc$main_category[1:(nrow(state_perc)/2)])
+
+ggplot(state_perc, aes(main_category, perc, fill=state)) + 
+  geom_bar(stat="identity") + 
+  ggtitle("Success vs. Failure Rate by Project Category") + 
+  xlab("Project Category") +
+  ylab("Percentage") +
+  scale_y_continuous(labels=scales::percent) + 
+  scale_fill_discrete(name="Project Status",
+                      breaks=c("successful", "failed"),
+                      labels=c("Success", "Failure")) + 
+  geom_text(aes(label=paste0(round(perc*100,1),"%")),
+            position=position_stack(vjust=0.5), 
+            colour="white", 
+            size=4) +
+  coord_flip() +
+  scale_fill_manual(values=c("lightblue3", "slateblue4"))
+  # theme(plot.title=element_text(hjust=0.5), axis.title=element_text(size=12, face="bold"),
+  #       axis.text.x=element_text(size=12), legend.position="bottom",
+  #       legend.title=element_text(size=12, face="bold"))
+```
+
+69% **Dance** projects reached their goal, followed by **Theater** and **Comics**, so they all have a low risk of failure.
+**Technology** had very high pledges, but also shows the lowest success rate. This category is attractive to people, but also strongly reliant on innovation and engineering.
+Overall Film & Video, Music, Games and Design seem to have the best funding vs success rate: these kind of products usually offer an instant satisfaction and are easily enjoyable.
+
+### World distribution
+
+Here we have the distribution of projects over the world. You can also navigate through this map for a better visualization. 
+
+```{r worldmap, echo=FALSE, message=FALSE}
+# worldmap
+projects_byCountry <- projects %>% 
+  group_by(country) %>% 
+  summarise(n=n()) %>% 
+  mutate(log_values=log(n))
+
+# projects_byCountry %>% arrange(desc(n))
+
+worldmap <- hcmap("custom/world", 
+  data = projects_byCountry, 
+  value = "n",
+  joinBy = c("hc-a2", "country"),
+  name = "number of projects",
+  labels = "n",
+  dataLabels = list(enabled = TRUE, 
+                        format = "{point.name}"), 
+  tooltip = list(valueDecimals = 0)) %>% 
+  hc_colorAxis(minColor = "#6495ED", maxColor = "#00008B") %>%
+  hc_mapNavigation(enabled = TRUE)
+
+```
+
+```{r show_worldmap, echo=FALSE}
+
+htmlwidgets::saveWidget(worldmap, file = "worldmap.html", selfcontained = TRUE)
+
+htmltools::tags$iframe(title = "Worldmap", src = "worldmap.html", height=500, width=900)
+
+```
+
+<!-- [worldmap](worldmap.html) -->
+
+Notice how many countries have never contributed with any campaign at all, while the majority of projects comes from the USA.
+
+```{r echo=FALSE, warning=FALSE, include=FALSE}
+# get country names from acronyms
+library(countrycode)
+
+# create a new column containing country names
+projects$country_name <- countrycode(projects$country, 'iso2c', 'country.name')
+
+# unique(projects$country_name)
+# there are na values, let's remove the corresponding entries
+world_projects <- projects %>%
+  filter(!is.na(projects$country_name))
+
+world_projects %>% 
+  group_by(country_name) %>% 
+  summarise(n=n()) %>% 
+  arrange(desc(n))
+```
+
+
+```{r echo=FALSE, message=FALSE}
+# success and failure by country
+statePerc_byCountry <- world_projects %>%
+  filter(state %in% c("successful", "failed")) %>%
+  group_by(country_name, state) %>%
+  summarize(n = n()) %>%
+  mutate(perc_byCountry = n/sum(n)) %>%
+  arrange(desc(state), perc_byCountry)
+
+statePerc_byCountry$country_name <- factor(statePerc_byCountry$country_name,
+levels=statePerc_byCountry$country_name[1:(nrow(statePerc_byCountry)/2)])
+
+ggplot(statePerc_byCountry, aes(country_name, perc_byCountry, fill=state)) + 
+  geom_bar(stat="identity") + 
+  ggtitle("Success vs. Failure Rate by Project Country") + 
+  xlab("Country") +
+  ylab("State percentage") +
+  scale_y_continuous(labels=scales::percent) + 
+  scale_fill_discrete(name="Project Status",
+                      breaks=c("successful", "failed"),
+                      labels=c("Success", "Failure")) + 
+  geom_text(aes(label=paste0(round(perc_byCountry*100,1),"%")),
+            position=position_stack(vjust=0.5), 
+            colour="white", 
+            size=4) +
+  coord_flip() +
+  scale_fill_manual(values=c("lightblue3", "slateblue4"))
+  # theme(plot.title=element_text(hjust=0.5), axis.title=element_text(size=12, face="bold"),
+  #       axis.text.x=element_text(size=12), legend.position="bottom",
+  #       legend.title=element_text(size=12, face="bold"))
+```
+
+Unfortunately, **Italy** shows up as the most unsuccessful country, based on 2243 projects, while the most successful one is **Honk Kong**, having quite a low number of projects (only 555).
+
+### Most frequent words
+
+Finally, I only took into account successful projects in order to extract the most frequent words appearing in project's names.
+
+I preprocessed the list of titles by removing punctuation, capital letters, white spaces and stopwords, then I got the worldcloud showed below.
+
+```{r echo=FALSE, warning=FALSE}
+
+# stemming
+projects$stemmed_names <- projects$name %>% 
+  removePunctuation() %>% 
+  tolower() %>%  
+  stripWhitespace() %>% 
+  removeWords(stopwords("en"))
+
+# here I only consider successful projects
+successful_projects <- projects %>% 
+  filter(state == "successful")
+
+wordcloud(successful_projects$stemmed_names, max.words = 100)
+
+
+```
+
+These are the names of successful projects containing the first five most frequent words:
+
+```{r echo=FALSE}
+# titles of successful projects containing the most frequent words
+successful_projects %>% 
+  filter(str_detect(stemmed_names, "music|game|new|first|film|book")) %>% 
+  select(name)
+```
+
+
+### Predicting success
+
+
+**Logistic regression** is a probabilistic statistical model that allows to perform binary classification (i.e. to predict a binary outcome) from a given set of continuous predictor variables.
+For training and test sets I choose a 60/40 split ratio.
+
+```{r echo=FALSE}
+# coverting binary state into bool
+bool_projects <- projects %>%
+  filter(state %in% c("successful", "failed")) %>%
+  mutate(binary_state = state=="successful")
+
+# bool_projects %>% select(state, binary_state)
+
+bool_projects$binary_state <- as.integer(as.logical(bool_projects$binary_state))
+
+## first try on a small subset 
+# bool_projects <- bool_projects[1:1000,]
+
+# set seed to make the code reproducible
+set.seed(123)
+
+# split data into train and test sets
+size <- nrow(bool_projects)
+
+logr_train <- bool_projects[1:size*0.6,]
+logr_test <- bool_projects[(size*0.6+1):size,] 
+```
+
+After fitting the `glm` model with different combinations of predictors, I got the lowest AIC and highest accuracy by using the following model:
+
+$$
+\text{state} = \beta_0 + \beta_1 \, \text{country} + \beta_2 \, \text{goal} + \beta_3 \, \text{category}
+$$
+
+The **AIC** value of a model is 
+$$
+AIC=2k-2ln(\hat{L}),
+$$
+where $k$ is the number of estimated parameters and $\hat{L}$ is the maximum value of the likelihood function for the model (the parameter values are calculated by maximising the likelihood function on the observations). It is a measure of the relative goodness of fit between two predictive models, since it penalizes the complexity of the model and maximizes the likehood. 
+
+```{r logistic regression, echo=FALSE, warning=FALSE}
+# Logistic regression
+logr_fit <- glm(binary_state ~ country + goal + main_category, family = binomial(logit), data=logr_train)
+
+# data <- test %>% select(usd_pledged_real, goal)
+logr_probabilities <- predict(logr_fit, logr_test)
+
+# from probabilities to binary classification
+logr_predictions <- ifelse(logr_probabilities > 0.5, 1, 0) 
+
+# AIC from fit
+paste('AIC', summary(logr_fit)$aic)
+```
+
+**Accuracy** is used to describe the closeness of a measurement to the true value, and is defined as the fraction of correct predictions over all predictions:
+$$
+\frac{TP+TN}{TP+TN+FP+FN}
+$$
+This model predicts success and failure with 57% accuracy. 
+
+```{r logistic regression accuracy, echo=FALSE}
+# measuring accuracy of the predictions
+logr_misClasificError <- mean(logr_predictions != logr_test$binary_state)
+
+print(paste('Accuracy', 1-logr_misClasificError))
+```
+
+The table below shows the exact number of classifications in each case: 0 for failure, 1 for success.
+
+```{r echo=FALSE}
+# table of predictions
+table(actual=logr_test$binary_state, predicted=logr_predictions)
+```
+
+Due to the high number of missclassifications, I decided to propose **Random Forest** as an alternative classification model.
+
+Random Forest is a supervised learning algorithm based on the idea of decision tree learning: each interior node of the tree corresponds to one of the input variables, each of the possible values of an input variable generates a new branch and each leaf reprents the value of the target variable obtained by using all the values correspondent of the correspondent branch to the root. Random forest builds many decision trees on different subsamples of features, in order to prevent overfitting and get a more stable classification.
+
+The problem with this model is that RAM consumption increases linearly with the number of estimators. Due to the capabilities of my machine, I could only use two predictors and the first 8000 entries of the dataset. 
+
+Despite this limitation, I got an accuracy of 63% on the predictions, meaning that it could potentially give very good results on another machine.
+
+```{r random forest, echo=FALSE, warning=FALSE}
+# have to subset data
+subset_bool_projects <- bool_projects[1:15000,]
+size <- nrow(subset_bool_projects)
+
+# transform categorical predictor into factors
+subset_bool_projects$main_category <- as.factor(subset_bool_projects$main_category)
+
+rf_train <- subset_bool_projects[1:size*0.6,]
+rf_test <- subset_bool_projects[(size*0.6+1):size,] 
+
+# fit random forest
+rf_fit <- randomForest(binary_state ~ goal + main_category, data=rf_train)
+
+# summary(fit)
+
+rf_probabilities <- predict(rf_fit, rf_test)
+
+# from probabilities to binary classification
+rf_predictions <- ifelse(rf_probabilities > 0.5, 1, 0) 
+
+# measuring accuracy of the predictions
+rf_misClasificError <- mean(rf_predictions != rf_test$binary_state)
+
+print(paste('Accuracy', 1-rf_misClasificError))
+
+# table of predictions
+table(actual=rf_test$binary_state, predicted=rf_predictions)
+```
+
+
+The **ROC curve** gives a graphical representation of accuracy, showing the true positive rate againts the false positive rate of our binary classifier: the closer the curve follows left and top borders of the space, the more accurate the test is. 
+
+```{r roc curve, echo=FALSE}
+#ROCR Curve
+ROCRpred_logr <- prediction(logr_probabilities, logr_test$binary_state)
+ROCRperf_logr <- performance(ROCRpred_logr, 'tpr','fpr')
+
+ROCRpred_rf <- prediction(rf_probabilities, rf_test$binary_state)
+ROCRperf_rf <- performance(ROCRpred_rf, 'tpr','fpr')
+
+plot(ROCRperf_logr)
+plot(ROCRperf_rf, add = TRUE, col='blue')
+legend(0.6, 0.4, legend=c("Logistic regression","Random Forest"), col=c("black","blue"), cex=0.8, lty=1)
+```
+
+A comparison between the two models used confirms the above results. 
+
+For additional informations you can consult the article [2], proposing a comparison between additional models other than the two just presented. Here Logistic Regression and Random Forest respectively reach 69% and 78% accuracy.
+
+## Conclusions
+
+In this project I explored all the possible factors influencing the success of a kickstarter project, by underlying the relationship between pledges, categories, fundings and countries.
+
+I proposed different visualizations of data through the use of `dplyr`, `ggplot2`, `worldcloud` and `highcharter` packages, including interactive representations.
+
+In the final part, I presented two different models for the prediction of success of a kickstarter campaign based on the available informations.
+
+## References
+
+[1] https://www.kaggle.com/kemical/kickstarter-projects/data
+
+[2] "Predicting the success of Kickstarter campaigns", Nida Hussain, Kareem Kamel, Archana Radhakrishna, 2017, unpublished.
+
+[3] "An Introduction to Statistical Learning, with Applications in R", Gareth James, Daniela Witten, Trevor Hastie, Robert Tibshirani, Springer, 2014.
+
+[4] "R for Data Science. Import, Tidy, Transform, Visualize,
+and Model Data", Hadley Wickham, Garrett Grolemund, O'Reilly, 2017.
+
+[5] "Data Analysis and Graphics Using R", John Maindonald, W. John Braun, 2003. 
+
+[6] "Predicting the Success of Kickstarter	Campaigns", Peter (Haochen) Zhou, 2017, unpublished.
