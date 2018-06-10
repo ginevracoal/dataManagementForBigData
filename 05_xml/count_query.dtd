@@ -1,0 +1,6 @@
+<!ELEMENT root          (act*)>
+<!ELEMENT act           (TITLE, nscenes, nspeeches, nlines)>
+<!ELEMENT TITLE         (#PCDATA)>
+<!ELEMENT nscenes       (#PCDATA)>
+<!ELEMENT nspeeches     (#PCDATA)>
+<!ELEMENT nlines        (#PCDATA)>

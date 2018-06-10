@@ -1,0 +1,209 @@
+---
+title: "Introduction to Spark in R using sparklyr"
+output: html_document
+editor_options: 
+  chunk_output_type: inline
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, cache = TRUE, eval = FALSE)
+```
+
+R lets you write data analysis code quickly. With a bit of care, you can also make your code easy to read, which means that you can easily maintain your code too. In many cases, R is also fast enough at running your code.
+
+Unfortunately, R requires that all your data be analyzed in main memory (RAM), on a single machine. This limits how much data you can analyze using R. There are a few solutions to this problem, including using Spark.
+
+Spark is an open source **cluster computing platform**. That means that you can *spread your data and your computations across multiple machines*, effectively letting you analyze an unlimited amount of data. Spark provides an interface for programming entire clusters with implicit data parallelism and fault tolerance. Spark also supports a pseudo-distributed *local mode*, usually used only for development or testing purposes, where distributed storage is not required and the local file system can be used instead; in such a scenario, Spark is run on a single machine with one executor per CPU core.
+
+**sparklyr** is an R package that lets you write R code to work with data in a Spark cluster. It has a dplyr interface, which means that you can write (more or less) the same dplyr-style R code, whether you are working with data on your machine or on a Spark cluster.
+
+
+
+This page is based in [Introduction to Spark in R using sparklyr](https://www.datacamp.com/courses/introduction-to-spark-in-r-using-sparklyr) DataCamp course by Richie Cotton.
+
+
+## Connect
+
+Working with sparklyr is very much like working with dplyr when you have data inside a database. In fact, sparklyr converts your R code into SQL code before passing it to Spark.
+
+The typical workflow has three steps:
+
+1. Connect to Spark using `spark_connect()`.
+2. Do some work.
+3. Close the connection to Spark using `spark_disconnect()`.
+
+`spark_connect()` takes a URL that gives the location to Spark. For a local cluster (as you are running), the URL should be "local". For a remote cluster (on another machine, typically a high-performance server), the connection string will be a URL and port to connect on.
+
+One word of warning. Connecting to a cluster takes several seconds, so it is impractical to regularly connect and disconnect. It is usually best to keep the connection open for the whole time that you want to work with Spark.
+
+```{r}
+
+# Load sparklyr
+library(sparklyr)
+
+# # install a local version of Spark for development purposes (only once!)
+# spark_install()
+
+# set Java home to Java 8 (only working with Java 8 at the moment)
+Sys.setenv(JAVA_HOME = "/Library/Java/JavaVirtualMachines/jdk1.8.0_171.jdk/Contents/Home")
+
+# Connect to your Spark cluster
+sc <- spark_connect("local")
+
+# Print the version of Spark
+spark_version(sc)
+
+```
+
+## Copy
+
+Before you can do any real work using Spark, you need to get your data into it. It is useful to be able to copy data from R to Spark. This is done with dplyr's `copy_to()` function. Be warned: copying data is a fundamentally slow process.  `copy_to()` takes two arguments: a Spark connection (dest), and a data frame (df) to copy over to Spark.
+
+Once you have copied your data into Spark, you might want some reassurance that it has actually worked. You can see a list of all the data frames stored in Spark using `src_tbls()`, which simply takes a Spark connection argument (x).
+
+```{r}
+# copy data: create a Spark table flights
+library(dplyr)
+flights_tbl <- copy_to(sc, nycflights13::flights, "flights")
+
+# show tables
+src_tbls(sc)
+
+# look inside flights Spark table
+flights_tbl
+
+
+```
+
+
+In the last exercise, when you copied the data to Spark, `copy_to()` returned a value. This return value is a special kind of `tibble()` that doesn't contain any data of its own.  Indeed, dplyr allows them to store data from a **remote data source**, such as databases, and – as is the case here – Spark. For remote datasets, the tibble object simply stores a connection to the remote data. 
+
+On the Spark side, the data is stored in a variable called a DataFrame. This is a more or less direct equivalent of R's data.frame variable type. Since these types are also analogous to database tables, sometimes the term table will also be used to describe this sort of rectangular data.
+
+Calling `tbl()` with a Spark connection, and a string naming the Spark data frame will return the same tibble object that was returned when you used `copy_to()`.
+
+
+```{r}
+# Link to the track_metadata table in Spark
+flights_tbl <- tbl(sc, "flights")
+
+# which class it belongs to
+class(flights_tbl)
+
+# how big the dataset is (we don't know in fact!)
+dim(flights_tbl)
+
+# try 
+View(flights_tbl)
+```
+
+## Query
+
+The easiest way to manipulate data frames stored in Spark is to use dplyr syntax.
+
+```{r}
+flight_delay <- 
+  flights_tbl %>% 
+  group_by(tailnum) %>%
+  summarise(count = n(), dist = mean(distance, na.rm = TRUE), delay = mean(arr_delay, na.rm = TRUE)) %>%
+  mutate(delay_by_distance = delay / dist) %>%
+  filter(count > 20, dist < 2000, !is.na(delay)) %>%
+  arrange(desc(delay_by_distance))
+
+flight_delay
+
+```
+
+Mind that sparklyr converts your dplyr code into SQL code before passing it to Spark. That means that most but **not all** dplyr queries can be submitted to sparklyr. For instance, there is no median function in SQL: 
+
+```{r}
+flights_tbl %>% 
+  group_by(tailnum) %>%
+  summarise(median_dist = median(distance))
+```
+
+
+There are lots of reasons that you might want to move your data from Spark to R. You've already seen how some data is moved from Spark to R when you print it. You also need to collect your dataset if you want to plot it, or if you want to use a modeling technique that is not available in Spark.
+
+* ´copy_to()´ moves your data from R to Spark; 
+* ´collect()´ goes in the opposite direction.
+
+```{r}
+
+library(ggplot2)
+ggplot(flight_delay, aes(dist, delay)) +
+  geom_point(aes(size = count), alpha = 1/2) +
+  geom_smooth() +
+  scale_size_area(max_size = 2)
+
+
+collected_flight_delay <- flight_delay %>%
+  collect()
+
+class(flight_delay)
+class(collected_flight_delay)
+
+ggplot(collected_flight_delay, aes(dist, delay)) +
+  geom_point(aes(size = count), alpha = 1/2) +
+  geom_smooth() +
+  scale_size_area(max_size = 2)
+
+```
+
+Sometimes you need to store intermediate results, since you can't pipeline the whole analysis. 
+Then we are facing a dilemma: you need to store the results of intermediate calculations, but you don't want to collect them because it is slow. The solution is to use ´compute()´ to compute the calculation, but store the results in a temporary data frame on Spark. Compute takes two arguments: a tibble, and a variable name for the Spark data frame that will store the results.
+
+```{r}
+computed_flight_delay <- flight_delay %>%
+  compute("flight_deleay")
+
+class(computed_flight_delay)
+
+src_tbls(sc)
+```
+
+As previously mentioned, when you use the dplyr interface, sparklyr converts your code into SQL before passing it to Spark. Most of the time, this is what you want. However, you can also write raw SQL to accomplish the same task. If you want your code to be portable – that is, used outside of R as well – then it may be useful. For example, a fairly common workflow is to use sparklyr to experiment with data processing, then switch to raw SQL in a production environment. 
+
+
+
+```{r}
+library(DBI)
+query = "select month, day, count(*) as count
+from flights
+group by month, day
+having count > 365
+order by -count
+limit 100"
+
+# evaluate the query and move all the results to R
+df <- dbGetQuery(sc, query) 
+class(df)
+
+# or evaluate the query in chuncks and move one chunk at a time
+rs <- dbSendQuery(sc, query)
+# first 10 rows
+dbFetch(rs, n = 10)
+# second 10 rows
+dbFetch(rs, n = 10)
+# third 10 rows
+dbFetch(rs, n = 10)
+dbClearResult(rs)
+
+```
+
+
+sparklyr also has two **native interfaces**. Native means that they call Java or Scala code to access Spark libraries directly, without any conversion to SQL. sparklyr supports the Spark DataFrame library and the Spark's machine learning library, MLlib. For more, see the [sparklyr cheat sheet](https://github.com/rstudio/cheatsheets/raw/master/sparklyr.pdf)
+
+
+When you are done, you can disconnect from Spark:
+
+```{r}
+# Disconnect from Spark
+spark_disconnect(sp)
+
+```
+
+
+
+
+

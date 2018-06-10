@@ -1,0 +1,35 @@
+<?xml version="1.0"?>
+<!DOCTYPE root SYSTEM "06_xml/count_query.dtd">
+
+<root>
+  <act>
+    <TITLE>ACT I</TITLE>
+    <nscenes>2</nscenes>
+    <nspeeches>90</nspeeches>
+    <nlines>356</nlines>
+  </act>
+  <act>
+    <TITLE>ACT II</TITLE>
+    <nscenes>2</nscenes>
+    <nspeeches>62</nspeeches>
+    <nlines>429</nlines>
+  </act>
+  <act>
+    <TITLE>ACT III</TITLE>
+    <nscenes>2</nscenes>
+    <nspeeches>180</nspeeches>
+    <nlines>681</nlines>
+  </act>
+  <act>
+    <TITLE>ACT IV</TITLE>
+    <nscenes>2</nscenes>
+    <nspeeches>64</nspeeches>
+    <nlines>265</nlines>
+  </act>
+  <act>
+    <TITLE>ACT V</TITLE>
+    <nscenes>1</nscenes>
+    <nspeeches>104</nspeeches>
+    <nlines>428</nlines>
+  </act>
+</root>

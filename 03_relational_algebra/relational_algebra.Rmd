@@ -38,7 +38,6 @@ $$
 ```{r}
 inner_join(flights, filter(weather, visib ==3)) %>% 
   select(flight, month, day, hour, origin, visib)
-  
 ```
 
 3. flight paths of length 2 (X –> Y –> Z)

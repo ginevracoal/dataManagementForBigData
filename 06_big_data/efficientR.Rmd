@@ -1,0 +1,206 @@
+---
+title: "Writing Efficient R Code"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, cache = TRUE)
+```
+
+The beauty of R is that it is built for performing data analysis. The downside is that sometimes R can be slow, thereby obstructing our analysis. For this reason, it is essential to become familiar with the main techniques for speeding up your analysis, so you can reduce computational time and get insights as quickly as possible.
+
+This page is based on [Writing Efficient R Code](https://campus.datacamp.com/courses/writing-efficient-r-code/fine-tuning-efficient-base-r?ex=3) DataCamp course by Colin Gillespie.
+
+Datasets: 
+* [movies.csv](movies.csv)
+* [movies.rds](movies.rds)
+
+## The Art of Benchmarking
+
+```{r eval=FALSE}
+# Print the R version details using version
+version
+
+# How long does it take to read movies from CSV?
+system.time(read.csv("movies.csv"))
+
+# How long does it take to read movies from RDS?
+system.time(readRDS("movies.rds"))
+
+# Load the package
+library(microbenchmark)
+
+# Compare the two functions
+compare <- microbenchmark(read.csv("movies.csv"), 
+                          readRDS("movies.rds"), 
+                          times = 10)
+
+# Print compare
+compare
+
+# Test how fast is your machine
+library(benchmarkme)
+
+# Assign the variable ram to the amount of RAM on this machine
+get_ram()
+
+# Assign the variable cpu to the cpu specs
+get_cpu()
+
+# Run the IO benchmark
+res <- benchmark_io(runs = 1, size = 5)
+
+# Upload benchmark results
+upload_results(res)
+
+# Plot the results and compare with other users
+plot(res)
+```
+
+## Fine Tuning: Efficient Base R
+
+```{r}
+n <- 30000
+# Slow code: increase the vector at each step
+growing <- function(n) {
+    x <- NULL
+    for(i in 1:n)
+        x <- c(x, rnorm(1))
+    x
+}
+
+# Use <- with system.time() to store the result as res_grow
+system.time(res_grow <- growing(n)) 
+
+# Fast code: pre-allocate vector
+pre_allocate <- function(n) {
+    x <- numeric(n) # Pre-allocate
+    for(i in 1:n) 
+        x[i] <- rnorm(1)
+    x
+}
+
+# Use <- with system.time() to store the result as res_allocate
+system.time(res_allocate <- pre_allocate(n))
+
+# Slow code: the following piece of code is written like traditional C or Fortran code. Instead of using the vectorized version of multiplication, it uses a for loop.
+x <- rnorm(10)
+x2 <- numeric(length(x))
+for(i in 1:10)
+    x2[i] <- x[i] * x[i]
+
+# Fast code: R-like code using vectorized multiplication
+x2_imp <- x * x
+
+# Slow code
+n <- 100
+total <- 0
+x <- runif(n)
+for(i in 1:n) 
+    total <- total + log(x[i])
+
+# Fast code
+log_sum <- sum(log(x))
+
+
+# Data frames or matrices?
+
+# A data frame
+df = data.frame(
+  a = lubridate::now() + runif(1e3) * 86400,
+  b = lubridate::today() + runif(1e3) * 30,
+  c = 1:1e3,
+  d = runif(1e3),
+  e = sample(letters, 1e3, replace = TRUE)
+)
+
+# A matrix
+mat = matrix(runif(6e3), ncol = 6)
+
+# Which is faster? 
+microbenchmark(mat[, 3], df[, 3])
+
+# Which is faster? 
+microbenchmark(mat[1, ], df[1, ])
+
+
+```
+## Diagnosing Problems: Code Profiling 
+
+```{r}
+# Load the profvis package
+library(profvis)
+
+movies = readRDS("06_big_data/movies.rds")
+
+# Profile the following code
+profvis({
+  # Load and select data
+  movies <- movies[movies$Comedy == 1, ]
+
+  # Plot data of interest
+  plot(movies$year, movies$rating)
+
+  # Loess (local polynomial) regression line
+  model <- loess(rating ~ year, data = movies)
+  
+  # Add fitted line to the plot
+  j <- order(movies$year)
+  lines(movies$year[j], model$fitted[j], col = "red")
+})
+```
+
+##
+
+```{r}
+# Load the parallel package
+library(parallel)
+
+# Store the number of cores in the object no_of_cores
+no_of_cores <- detectCores()
+
+# Print no_of_cores
+no_of_cores
+
+
+# Create a cluster via makeCluster
+cl <- makeCluster(no_of_cores-1)
+
+# Parallel apply: 10 columns of length 100
+m = matrix(runif(1e3), ncol = 1e1)
+microbenchmark(parApply(cl, m, 2, median), apply(m, 2, median))
+
+# Parallel apply: 100 columns of length 100
+m = matrix(runif(1e4), ncol = 1e2)
+microbenchmark(parApply(cl, m, 2, median), apply(m, 2, median))
+
+# Parallel apply: 1000 columns of length 100
+m = matrix(runif(1e5), ncol = 1e3)
+microbenchmark(parApply(cl, m, 2, median), apply(m, 2, median))
+
+# Stop the cluster
+stopCluster(cl)
+
+
+# Create a cluster via makeCluster
+cl1 <- makeCluster(1)
+cl2 <- makeCluster(2)
+cl3 <- makeCluster(3)
+cl4 <- makeCluster(4)
+
+# even more columns
+m = matrix(runif(1e5), ncol = 1e3)
+microbenchmark(parApply(cl1, m, 2, median), parApply(cl2, m, 2, median), parApply(cl3, m, 2, median), parApply(cl4, m, 2, median))
+
+# Stop the cluster
+stopCluster(cl1)
+stopCluster(cl2)
+stopCluster(cl3)
+stopCluster(cl4)
+
+```
+
+
+
