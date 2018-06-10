@@ -689,7 +689,7 @@ legend(0.6, 0.4, legend=c("Logistic regression","Random Forest"), col=c("black",
 
 A comparison between the two models used confirms the above results. 
 
-For additional informations you can consult the article [2], proposing a comparison between additional models other than the two just presented. Here Logistic Regression and Random Forest respectively reach 69% and 78% accuracy.
+For more informations you can consult the article [2], proposing a comparison between additional models other than the two just presented. Here Logistic Regression and Random Forest respectively reach 69% and 78% accuracy.
 
 ## Conclusions
 
